@@ -1,0 +1,21 @@
+{
+  "sede": "Vitacura",
+  "horarios_por_dia": {
+    "monday": "7-8",
+    "tuesday": "11-12",
+    "wednesday": null,
+    "thursday": "7-8",
+    "friday": "7-8",
+    "saturday": null,
+    "sunday": null
+  },
+  "bloques_alternativos_por_dia": {
+    "monday": [],
+    "tuesday": [],
+    "wednesday": [],
+    "thursday": [],
+    "friday": [],
+    "saturday": [],
+    "sunday": []
+  }
+}
