@@ -6,9 +6,11 @@ Sin dependencias externas (usa únicamente la librería estándar de Python 3.9+
 from __future__ import annotations
 
 import argparse
+import fcntl
 import http.cookiejar
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -20,6 +22,7 @@ from zoneinfo import ZoneInfo
 
 BASE_URL = "https://reservasgimnasiosantiago.cl"
 CHILE_TZ = ZoneInfo("America/Santiago")
+LOCK_FILE_PATH = Path("/tmp/bot_gym_usm.lock")
 
 BLOQUES_HORARIOS = {
     "1-2": "08:15 - 09:25",
@@ -67,6 +70,22 @@ def log(msg: str) -> None:
     print(f"[{ts} CL] {msg}", flush=True)
 
 
+def keep_mac_awake() -> subprocess.Popen | None:
+    """En macOS, lanza caffeinate vinculado a este PID para evitar que el Mac vuelva a dormir antes de las 06:30."""
+    if sys.platform == "darwin" and Path("/usr/bin/caffeinate").exists():
+        try:
+            proc = subprocess.Popen(
+                ["/usr/bin/caffeinate", "-dimsu", "-w", str(os.getpid())],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            log(f"☕ Prevención de suspensión macOS activa (caffeinate PID {proc.pid})")
+            return proc
+        except Exception as exc:
+            log(f"⚠️ No se pudo iniciar caffeinate: {exc}")
+    return None
+
+
 class GymUSMClient:
     def __init__(self, base_url: str = BASE_URL) -> None:
         self.base_url = base_url.rstrip("/")
@@ -82,11 +101,18 @@ class GymUSMClient:
             ),
             "Accept": "application/json",
             "Content-Type": "application/json",
+            "Connection": "keep-alive",
             "Origin": self.base_url,
             "Referer": f"{self.base_url}/",
         }
 
-    def request(self, method: str, path: str, payload: dict | None = None) -> tuple[bool, int, dict | str]:
+    def request(
+        self,
+        method: str,
+        path: str,
+        payload: dict | None = None,
+        timeout: float = 10.0,
+    ) -> tuple[bool, int, dict | str]:
         url = f"{self.base_url}{path}"
         data = json.dumps(payload).encode("utf-8") if payload is not None else None
         req = urllib.request.Request(url, data=data, method=method)
@@ -94,7 +120,7 @@ class GymUSMClient:
             req.add_header(k, v)
 
         try:
-            with self.opener.open(req, timeout=15) as resp:
+            with self.opener.open(req, timeout=timeout) as resp:
                 status = resp.status
                 raw = resp.read().decode("utf-8", errors="replace")
                 try:
@@ -114,15 +140,36 @@ class GymUSMClient:
 
     def login(self, email: str, password: str) -> tuple[bool, dict]:
         ok, status, data = self.request(
-            "POST", "/api/login", {"username": email, "password": password}
+            "POST", "/api/login", {"username": email, "password": password}, timeout=12.0
         )
         if ok and isinstance(data, dict) and data.get("user"):
             return True, data
         err_msg = data.get("error") if isinstance(data, dict) else str(data)
         return False, {"status": status, "error": err_msg or "Credenciales inválidas"}
 
+    def login_with_retry(
+        self, email: str, password: str, max_retries: int = 20, delay: float = 2.0
+    ) -> tuple[bool, dict]:
+        """Reintenta el login ante demoras de reconexión Wi-Fi al despertar el Mac o errores temporales."""
+        last_info: dict = {}
+        for attempt in range(1, max_retries + 1):
+            ok, info = self.login(email, password)
+            if ok:
+                return True, info
+            last_info = info
+            status = info.get("status", 500)
+            # Si es 401 explícito del servidor, aún reintentamos un par de veces pero no 20
+            if status == 401 and attempt >= 3:
+                break
+            log(
+                f"⏳ Intento de login #{attempt}/{max_retries} falló ({info.get('error')}). "
+                f"Reintentando en {delay}s..."
+            )
+            time.sleep(delay)
+        return False, last_info
+
     def get_mis_reservas(self) -> list[dict]:
-        ok, _, data = self.request("GET", "/api/reservas")
+        ok, _, data = self.request("GET", "/api/reservas", timeout=10.0)
         if ok and isinstance(data, dict):
             return data.get("reservas") or []
         return []
@@ -131,7 +178,7 @@ class GymUSMClient:
         path = "/api/cupos"
         if sede:
             path += f"?sede={urllib.parse.quote(sede)}"
-        ok, _, data = self.request("GET", path)
+        ok, _, data = self.request("GET", path, timeout=10.0)
         return data if (ok and isinstance(data, dict)) else {}
 
     def reservar(self, bloque_horario: str, sede: str) -> tuple[bool, int, dict]:
@@ -139,6 +186,7 @@ class GymUSMClient:
             "POST",
             "/api/reservas",
             {"bloque_horario": bloque_horario, "sede": sede},
+            timeout=6.0,
         )
         if not isinstance(data, dict):
             data = {"message": str(data)}
@@ -146,7 +194,7 @@ class GymUSMClient:
 
 
 def wait_until(target_dt: datetime) -> None:
-    """Espera con precisión hasta target_dt (hora de Chile)."""
+    """Espera con precisión de milisegundos hasta target_dt (hora de Chile)."""
     while True:
         current = now_chile()
         remaining = (target_dt - current).total_seconds()
@@ -154,12 +202,12 @@ def wait_until(target_dt: datetime) -> None:
             break
         if remaining > 60:
             log(f"Esperando apertura... faltan {remaining / 60:.1f} minutos para {target_dt.strftime('%H:%M:%S')}")
-            time.sleep(min(30.0, remaining - 15.0))
+            time.sleep(min(25.0, remaining - 15.0))
         elif remaining > 2:
             log(f"Preparando disparo... faltan {remaining:.1f} segundos")
             time.sleep(remaining - 1.5)
         else:
-            time.sleep(max(0.01, remaining / 2))
+            time.sleep(max(0.005, remaining / 2))
 
 
 def main() -> int:
@@ -211,7 +259,7 @@ def main() -> int:
 
     if args.test_login:
         log(f"Probando inicio de sesión para {email}...")
-        ok, info = client.login(email, password)
+        ok, info = client.login_with_retry(email, password, max_retries=3)
         if not ok:
             log(f"❌ Error de login: {info.get('error')} (HTTP {info.get('status')})")
             return 1
@@ -227,6 +275,16 @@ def main() -> int:
                 horario = BLOQUES_HORARIOS.get(b, "")
                 log(f"   • Bloque {b:5s} ({horario}): {c['disponibles']}/{c['total']} disponibles")
         return 0
+
+    # Evitar que dos instancias locales corran al mismo tiempo si launchd dispara varios turnos
+    lock_file = open(LOCK_FILE_PATH, "w")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("ℹ️ Otra instancia del bot ya está en ejecución y esperando las 06:30. Saliendo.")
+        return 0
+
+    keep_mac_awake()
 
     # Determinar el bloque del día según la hora de Chile
     today_cl = now_chile()
@@ -255,11 +313,11 @@ def main() -> int:
         f"Bloque objetivo: {bloque_principal} ({BLOQUES_HORARIOS.get(bloque_principal, '')})"
     )
 
-    # 1. Login inicial para verificar credenciales y si ya existe reserva hoy
+    # 1. Login inicial con reintentos (por si el Wi-Fi del Mac está recién despertando)
     log(f"Autenticando como {email}...")
-    ok, login_data = client.login(email, password)
+    ok, login_data = client.login_with_retry(email, password, max_retries=20, delay=2.0)
     if not ok:
-        log(f"❌ Falló la autenticación inicial: {login_data.get('error')}")
+        log(f"❌ Falló la autenticación inicial tras varios intentos: {login_data.get('error')}")
         return 1
     log(f"✅ Sesión iniciada correctamente ({login_data['user'].get('name')})")
 
@@ -268,49 +326,61 @@ def main() -> int:
         log(f"✅ Ya tienes una reserva registrada para hoy: {reservas_actuales}")
         return 0
 
-    # 2. Si se ejecuta antes de las 06:30:00 AM (y no se pasó --now), esperar y re-autenticar a las 06:29:45
+    open_time = now_chile().replace(hour=6, minute=30, second=0, microsecond=0)
+
+    # 2. Si se ejecuta antes de las 06:30:00 AM (y no se pasó --now), esperar y re-autenticar a las 06:29:40
     if not args.now:
         now = now_chile()
-        open_time = now.replace(hour=6, minute=30, second=0, microsecond=0)
-        warmup_time = open_time - timedelta(seconds=15)  # 06:29:45
-        fire_time = open_time - timedelta(milliseconds=600)  # 06:29:59.400
+        warmup_time = open_time - timedelta(seconds=20)  # 06:29:40
+        fire_time = open_time - timedelta(milliseconds=500)  # 06:29:59.500
 
-        # Si el cron de respaldo de cambio de hora se ejecutó después de las 07:00 AM y ya pasó la ventana
         if now > open_time + timedelta(minutes=30):
             log("ℹ️ Ejecución posterior a las 07:00 AM. Intentando reservar de inmediato por si quedan cupos...")
         elif now < open_time:
             if now < warmup_time:
                 wait_until(warmup_time)
-                log("🔄 Refrescando sesión a las 06:29:45 para asegurar cookie activa...")
-                client.login(email, password)
+                log("🔄 Refrescando sesión a las 06:29:40 para asegurar cookie fresca y conexión activa...")
+                client.login_with_retry(email, password, max_retries=5, delay=1.0)
+                # Calentar conexión leyendo cupos a las 06:29:50
+                client.get_cupos(sede)
             wait_until(fire_time)
 
     # 3. Bucle de reserva de alta velocidad a las 06:30:00 AM
-    max_attempts = 90 if not args.now else 5
-    delay_seconds = 0.35
+    max_attempts = 140 if not args.now else 5
+    delay_seconds = 0.25
 
-    for bloque in bloques_a_intentar:
-        log(f"🚀 Iniciando intentos de reserva para Bloque {bloque} en {sede}...")
+    for idx_bloque, bloque in enumerate(bloques_a_intentar):
+        tiene_alternativo = idx_bloque < (len(bloques_a_intentar) - 1)
+        log(f"🚀 Iniciando ráfaga de reserva para Bloque {bloque} en {sede}...")
+
         for attempt in range(1, max_attempts + 1):
             ok, status, resp = client.reservar(bloque, sede)
             msg = resp.get("message") or resp.get("error") or str(resp)
 
             if ok:
-                log(f"🎉 ¡RESERVA EXITOSA en intento #{attempt}! Bloque {bloque} ({BLOQUES_HORARIOS.get(bloque, '')}) - {sede}")
+                log(
+                    f"🎉 ¡RESERVA EXITOSA en intento #{attempt}! "
+                    f"Bloque {bloque} ({BLOQUES_HORARIOS.get(bloque, '')}) - {sede}"
+                )
                 log(f"   Respuesta del servidor: {msg}")
                 return 0
 
             msg_lower = str(msg).lower()
             log(f"   [Intento #{attempt}/{max_attempts}] HTTP {status}: {msg}")
 
-            # Si ya tiene una reserva hecha
+            # Si una petición anterior ya entró y dejó la reserva activa
             if "ya tienes" in msg_lower or "ya posee" in msg_lower or "máximo" in msg_lower:
-                log("✅ El servidor indica que ya tienes una reserva activa para hoy.")
+                log("✅ El servidor confirma que ya tienes tu reserva activa para hoy.")
                 return 0
 
-            # Si el bloque se quedó sin cupos, pasar al bloque alternativo (si hay)
-            if "sin cupos" in msg_lower or "no quedan cupos" in msg_lower or "agotado" in msg_lower:
-                log(f"⚠️ Bloque {bloque} sin cupos disponibles.")
+            # Solo saltar a un bloque alternativo si realmente hay uno configurado
+            # y ya pasaron al menos 10 segundos desde las 06:30:00 AM
+            if (
+                tiene_alternativo
+                and now_chile() > (open_time + timedelta(seconds=10))
+                and ("sin cupos" in msg_lower or "no quedan cupos" in msg_lower or "agotado" in msg_lower)
+            ):
+                log(f"⚠️ Bloque {bloque} sin cupos disponibles. Probando bloque alternativo...")
                 break
 
             # Si la sesión expiró, re-autenticar rápido
