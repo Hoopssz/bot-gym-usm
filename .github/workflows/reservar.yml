@@ -2,14 +2,18 @@ name: Reserva Automática Gimnasio USM
 
 on:
   schedule:
-    # 06:07 AM Hora de Chile en Horario de Verano (UTC-3 -> 09:07 UTC)
-    # Se inicia ~23 minutos antes de las 06:30 para absorber cualquier retraso de GitHub Actions
-    # y disparar con precisión de milisegundos a las 06:30:00 AM.
+    # Horario de Verano Chile (UTC-3): múltiples disparos escalonados entre 05:58 y 06:23 AM CL
+    # por si GitHub Actions retrasa o salta un turno en hora punta.
+    - cron: '58 8 * * 1-5'
     - cron: '7 9 * * 1-5'
-    # 06:07 AM Hora de Chile en Horario de Invierno (UTC-4 -> 10:07 UTC)
+    - cron: '16 9 * * 1-5'
+    - cron: '23 9 * * 1-5'
+    # Horario de Invierno Chile (UTC-4): 05:58 a 06:23 AM CL
+    - cron: '58 9 * * 1-5'
     - cron: '7 10 * * 1-5'
+    - cron: '16 10 * * 1-5'
+    - cron: '23 10 * * 1-5'
 
-  # Permite probar o ejecutar manualmente desde la pestaña "Actions" en GitHub
   workflow_dispatch:
     inputs:
       modo:
@@ -22,10 +26,14 @@ on:
           - reservar-ahora
           - esperar-0630
 
+concurrency:
+  group: reserva-diaria-gym-usm
+  cancel-in-progress: false
+
 jobs:
   reservar:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
 
     steps:
       - name: Descargar código del bot

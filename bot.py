@@ -3,6 +3,7 @@
 Bot de Reserva Automática - Gimnasio USM (https://reservasgimnasiosantiago.cl)
 Sin dependencias externas (usa únicamente la librería estándar de Python 3.9+).
 """
+from __future__ import annotations
 
 import argparse
 import http.cookiejar
@@ -229,10 +230,10 @@ def main() -> int:
 
     # Determinar el bloque del día según la hora de Chile
     today_cl = now_chile()
-    if not args.now and today_cl.hour < 6:
+    if not args.now and (today_cl.hour < 5 or (today_cl.hour == 5 and today_cl.minute < 45)):
         log(
             f"ℹ️ Son las {today_cl.strftime('%H:%M')} en Chile (horario de invierno UTC-4). "
-            "Esta ejecución corresponde al cron de verano; el cron de las 06:07 AM CL ejecutará la reserva en 1 hora."
+            "Esta ejecución corresponde al cron de verano; el cron de las 06:xx AM CL ejecutará la reserva en 1 hora."
         )
         return 0
 
