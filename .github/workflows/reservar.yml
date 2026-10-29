@@ -1,0 +1,54 @@
+name: Reserva Automática Gimnasio USM
+
+on:
+  schedule:
+    # 06:07 AM Hora de Chile en Horario de Verano (UTC-3 -> 09:07 UTC)
+    # Se inicia ~23 minutos antes de las 06:30 para absorber cualquier retraso de GitHub Actions
+    # y disparar con precisión de milisegundos a las 06:30:00 AM.
+    - cron: '7 9 * * 1-5'
+    # 06:07 AM Hora de Chile en Horario de Invierno (UTC-4 -> 10:07 UTC)
+    - cron: '7 10 * * 1-5'
+
+  # Permite probar o ejecutar manualmente desde la pestaña "Actions" en GitHub
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'Modo de ejecución'
+        required: true
+        default: 'test-login'
+        type: choice
+        options:
+          - test-login
+          - reservar-ahora
+          - esperar-0630
+
+jobs:
+  reservar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Descargar código del bot
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Ejecutar Bot Gimnasio USM
+        env:
+          GYM_EMAIL: ${{ secrets.GYM_EMAIL }}
+          GYM_PASSWORD: ${{ secrets.GYM_PASSWORD }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ inputs.modo }}" = "test-login" ]; then
+              python3 bot.py --test-login
+            elif [ "${{ inputs.modo }}" = "reservar-ahora" ]; then
+              python3 bot.py --now
+            else
+              python3 bot.py
+            fi
+          else
+            python3 bot.py
+          fi
