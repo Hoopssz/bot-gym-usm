@@ -9,7 +9,7 @@ Bot ligero en Python (sin dependencias externas) que se conecta directamente a l
 - **Martes:** Bloque `11-12` (16:05 - 17:15)
 - **Miércoles:** Sin reserva (`null`)
 - **Jueves:** Bloque `7-8` (12:30 - 13:40)
-- **Viernes:** Bloque `7-8` (12:30 - 13:40)
+- **Viernes:** Bloque `5-6` (11:05 - 12:15)
 
 > Si algún semestre o semana quieres cambiar un bloque, solo edita [`config.json`](./config.json).
 
