@@ -295,6 +295,13 @@ def main() -> int:
         )
         return 0
 
+    if not args.now and today_cl.hour >= 8:
+        log(
+            f"ℹ️ Ejecución tardía de cron detectada ({today_cl.strftime('%H:%M')} CL). "
+            "La ventana de apertura de las 06:30 AM ya pasó; saliendo sin error."
+        )
+        return 0
+
     day_key = today_cl.strftime("%A").lower()
     dia_nombre = DIAS_ES.get(day_key, day_key)
 
