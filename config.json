@@ -1,5 +1,6 @@
 {
   "sede": "Vitacura",
+  "pausado_hasta": "2026-11-22",
   "horarios_por_dia": {
     "monday": "7-8",
     "tuesday": "7-8",

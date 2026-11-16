@@ -288,6 +288,15 @@ def main() -> int:
 
     # Determinar el bloque del día según la hora de Chile
     today_cl = now_chile()
+    today_str = today_cl.strftime("%Y-%m-%d")
+    pausado_hasta = config.get("pausado_hasta")
+    if not args.now and pausado_hasta and today_str <= str(pausado_hasta):
+        log(
+            f"⏸️ Bot pausado temporalmente hasta el {pausado_hasta} (hoy es {today_str}). "
+            "No se realizará reserva hoy; se reactivará solo la próxima semana."
+        )
+        return 0
+
     if not args.now:
         minutos_del_dia = today_cl.hour * 60 + today_cl.minute
         # Ventana operativa matutina: 05:45 AM (345 min) a 07:45 AM (465 min) hora de Chile
