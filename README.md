@@ -6,7 +6,7 @@ Bot ligero en Python (sin dependencias externas) que se conecta directamente a l
 
 - **Sede:** `Vitacura`
 - **Lunes:** Bloque `7-8` (12:30 - 13:40)
-- **Martes:** Bloque `11-12` (16:05 - 17:15)
+- **Martes:** Bloque `7-8` (12:30 - 13:40)
 - **Miércoles:** Sin reserva (`null`)
 - **Jueves:** Bloque `7-8` (12:30 - 13:40)
 - **Viernes:** Bloque `5-6` (11:05 - 12:15)
