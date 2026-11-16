@@ -2,10 +2,10 @@ name: Reserva Automática Gimnasio USM
 
 on:
   schedule:
-    # Horario de Verano Chile (UTC-3 -> 06:07 AM CL)
-    - cron: '7 9 * * 1-5'
-    # Horario de Invierno Chile (UTC-4 -> 06:07 AM CL)
-    - cron: '7 10 * * 1-5'
+    # Se ejecuta a los minutos :05 y :18 de cada hora (Lunes a Viernes) para absorber
+    # cualquier desfase de cola de GitHub Actions. Fuera de la ventana 05:45-07:45 AM Chile,
+    # el script termina en 1 segundo sin tocar el servidor del gimnasio.
+    - cron: '5,18 * * * 1-5'
 
   workflow_dispatch:
     inputs:

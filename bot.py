@@ -288,19 +288,15 @@ def main() -> int:
 
     # Determinar el bloque del día según la hora de Chile
     today_cl = now_chile()
-    if not args.now and (today_cl.hour < 5 or (today_cl.hour == 5 and today_cl.minute < 45)):
-        log(
-            f"ℹ️ Son las {today_cl.strftime('%H:%M')} en Chile (horario de invierno UTC-4). "
-            "Esta ejecución corresponde al cron de verano; el cron de las 06:xx AM CL ejecutará la reserva en 1 hora."
-        )
-        return 0
-
-    if not args.now and today_cl.hour >= 8:
-        log(
-            f"ℹ️ Ejecución tardía de cron detectada ({today_cl.strftime('%H:%M')} CL). "
-            "La ventana de apertura de las 06:30 AM ya pasó; saliendo sin error."
-        )
-        return 0
+    if not args.now:
+        minutos_del_dia = today_cl.hour * 60 + today_cl.minute
+        # Ventana operativa matutina: 05:45 AM (345 min) a 07:45 AM (465 min) hora de Chile
+        if minutos_del_dia < (5 * 60 + 45) or minutos_del_dia > (7 * 60 + 45):
+            log(
+                f"ℹ️ Hora actual en Chile: {today_cl.strftime('%H:%M')}. "
+                "Fuera de la ventana de reserva matutina (05:45 - 07:45 CL); saliendo sin error."
+            )
+            return 0
 
     day_key = today_cl.strftime("%A").lower()
     dia_nombre = DIAS_ES.get(day_key, day_key)
@@ -320,9 +316,9 @@ def main() -> int:
         f"Bloque objetivo: {bloque_principal} ({BLOQUES_HORARIOS.get(bloque_principal, '')})"
     )
 
-    # 1. Login inicial con reintentos (por si el Wi-Fi del Mac está recién despertando)
+    # 1. Login inicial con reintentos amplios (por si el Wi-Fi del Mac está recién despertando)
     log(f"Autenticando como {email}...")
-    ok, login_data = client.login_with_retry(email, password, max_retries=20, delay=2.0)
+    ok, login_data = client.login_with_retry(email, password, max_retries=120, delay=3.0)
     if not ok:
         log(f"❌ Falló la autenticación inicial tras varios intentos: {login_data.get('error')}")
         return 1
